@@ -15,23 +15,35 @@
     .progress-bar { height: 22px; background: #e9ecef; border-radius: 8px; margin-bottom: 12px; overflow: hidden;}
     .progress { height: 100%; background: #2d90f5; width: 0; transition: width 0.2s;}
     .status { margin-bottom: 10px; font-size: 1.1em; color: #2d90f5;}
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px;}
+    .tab-btn { padding: 7px 22px; border: none; border-radius: 8px 8px 0 0; background: #e9ecef; cursor: pointer; color: #444; font-weight: bold;}
+    .tab-btn.active { background: #2d90f5; color: #fff;}
+    ul { font-size: 0.97em; color: #333; margin: 0; padding-left: 20px;}
     .error { color: #c00; font-weight: bold; }
     .success { color: #090; font-weight: bold;}
     input[type="file"] { padding: 10px;}
-    button { margin-top: 20px; padding: 10px 30px; border: none; border-radius: 6px; background: #2d90f5; color: #fff; font-size: 1.1em; cursor: pointer;}
+    button:not(.tab-btn) { margin-top: 20px; padding: 10px 30px; border: none; border-radius: 6px; background: #2d90f5; color: #fff; font-size: 1.1em; cursor: pointer;}
     button:disabled { background: #999; cursor: not-allowed; }
-    ul { font-size: 0.97em; color: #333; }
+    .tab-content { display: none; min-height: 32px;}
+    .tab-content.active { display: block;}
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>Renomeador de PDFs - LEADEC</h2>
-    <p>Faça upload de vários espelhos de ponto em PDF.<br>
-    O sistema extrai automaticamente o <b>nome do colaborador</b> e renomeia o arquivo.</p>
     <input type="file" id="fileInput" accept="application/pdf" multiple><br>
     <div class="progress-bar"><div class="progress" id="progress"></div></div>
     <div class="status" id="status">Aguardando arquivos...</div>
-    <ul id="log"></ul>
+    
+    <div class="tabs">
+      <button class="tab-btn active" id="tabSuccess">Sucesso</button>
+      <button class="tab-btn" id="tabError">Erros</button>
+    </div>
+    <div id="successContent" class="tab-content active">
+      <ul id="logSuccess"></ul>
+    </div>
+    <div id="errorContent" class="tab-content">
+      <ul id="logError"></ul>
+    </div>
     <button id="downloadBtn" style="display:none">Baixar PDFs renomeados (.zip)</button>
   </div>
 
@@ -39,8 +51,28 @@
 const fileInput = document.getElementById('fileInput');
 const status = document.getElementById('status');
 const progress = document.getElementById('progress');
-const log = document.getElementById('log');
+const logSuccess = document.getElementById('logSuccess');
+const logError = document.getElementById('logError');
 const downloadBtn = document.getElementById('downloadBtn');
+
+// Tab logic
+const tabSuccess = document.getElementById('tabSuccess');
+const tabError = document.getElementById('tabError');
+const successContent = document.getElementById('successContent');
+const errorContent = document.getElementById('errorContent');
+
+tabSuccess.onclick = () => {
+  tabSuccess.classList.add('active');
+  tabError.classList.remove('active');
+  successContent.classList.add('active');
+  errorContent.classList.remove('active');
+};
+tabError.onclick = () => {
+  tabError.classList.add('active');
+  tabSuccess.classList.remove('active');
+  errorContent.classList.add('active');
+  successContent.classList.remove('active');
+};
 
 let renamedFiles = [];
 
@@ -49,23 +81,18 @@ function sanitizeFileName(name) {
 }
 
 function findColaboradorName(text) {
-  // Divide o texto em linhas
   const lines = text.split('\n').map(line => line.trim());
-  
-  // Procura pela linha "Nome" e verifica a linha anterior
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].toUpperCase().includes('NOME') && i > 0) {
       const nomeLine = lines[i-1].trim();
-      // Verifica se a linha anterior parece um nome (pelo menos 2 palavras com maiúsculas)
-      if (nomeLine === nomeLine.toUpperCase() && 
-          nomeLine.split(' ').length >= 2 && 
+      if (nomeLine === nomeLine.toUpperCase() &&
+          nomeLine.split(' ').length >= 2 &&
           nomeLine.split(' ').every(word => word.length > 2)) {
         return nomeLine;
       }
     }
   }
-  
-  // Caso não encontre, procura por padrões de nome em maiúsculas
+  // Alternativa para padrões de nome em maiúsculas isoladas
   const namePattern = /^([A-ZÀ-Ú]{3,}(?:\s+[A-ZÀ-Ú]{3,})+)$/;
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(namePattern);
@@ -73,13 +100,13 @@ function findColaboradorName(text) {
       return match[1].trim();
     }
   }
-  
   return null;
 }
 
 async function processFiles(files) {
   renamedFiles = [];
-  log.innerHTML = '';
+  logSuccess.innerHTML = '';
+  logError.innerHTML = '';
   let zip = new JSZip();
   let nameCounts = {};
   let errors = 0;
@@ -94,8 +121,6 @@ async function processFiles(files) {
       arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
       let fullText = "";
-      
-      // Processa apenas a primeira página (onde normalmente está o nome)
       const page = await pdf.getPage(1);
       const content = await page.getTextContent();
       fullText = content.items.map(i => i.str).join('\n');
@@ -103,7 +128,7 @@ async function processFiles(files) {
       const nome = findColaboradorName(fullText);
 
       if (!nome) {
-        log.innerHTML += `<li class="error">[${file.name}] <b>Nome não identificado!</b></li>`;
+        logError.innerHTML += `<li class="error">[${file.name}] <b>Nome não identificado!</b></li>`;
         errors++;
         continue;
       }
@@ -120,10 +145,10 @@ async function processFiles(files) {
       zip.file(newFileName, arrayBuffer);
       renamedFiles.push(newFileName);
 
-      log.innerHTML += `<li class="success">[${file.name}] &rarr; <b>${newFileName}</b></li>`;
+      logSuccess.innerHTML += `<li class="success">[${file.name}] &rarr; <b>${newFileName}</b></li>`;
 
     } catch (err) {
-      log.innerHTML += `<li class="error">[${file.name}] Erro ao processar: ${err.message}</li>`;
+      logError.innerHTML += `<li class="error">[${file.name}] Erro ao processar: ${err.message}</li>`;
       errors++;
     }
   }

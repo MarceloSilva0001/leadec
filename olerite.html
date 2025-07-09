@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Renomeador de Olerites</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; background: #f8f9fa; }
+    .container { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 10px; padding: 32px; box-shadow: 0 0 30px #0002;}
+    .progress-bar { height: 22px; background: #e9ecef; border-radius: 8px; margin-bottom: 12px; overflow: hidden;}
+    .progress { height: 100%; background: #2d90f5; width: 0; transition: width 0.2s;}
+    .status { margin-bottom: 10px; font-size: 1.1em; color: #2d90f5;}
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px;}
+    .tab-btn { padding: 7px 22px; border: none; border-radius: 8px 8px 0 0; background: #e9ecef; cursor: pointer; color: #444; font-weight: bold;}
+    .tab-btn.active { background: #2d90f5; color: #fff;}
+    ul { font-size: 0.97em; color: #333; margin: 0; padding-left: 20px;}
+    .error { color: #c00; font-weight: bold; }
+    .success { color: #090; font-weight: bold;}
+    input[type="file"] { padding: 10px;}
+    button:not(.tab-btn) { margin-top: 20px; padding: 10px 30px; border: none; border-radius: 6px; background: #2d90f5; color: #fff; font-size: 1.1em; cursor: pointer;}
+    button:disabled { background: #999; cursor: not-allowed; }
+    .tab-content { display: none; min-height: 32px;}
+    .tab-content.active { display: block;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Renomeador de Olerites (PDFs)</h2>
+    <input type="file" id="fileInput" accept="application/pdf" multiple><br>
+    <div class="progress-bar"><div class="progress" id="progress"></div></div>
+    <div class="status" id="status">Aguardando arquivos...</div>
+    
+    <div class="tabs">
+      <button class="tab-btn active" id="tabSuccess">Sucesso</button>
+      <button class="tab-btn" id="tabError">Erros</button>
+    </div>
+    <div id="successContent" class="tab-content active">
+      <ul id="logSuccess"></ul>
+    </div>
+    <div id="errorContent" class="tab-content">
+      <ul id="logError"></ul>
+    </div>
+    <button id="downloadSuccessBtn" style="display:none">Baixar ZIP Sucesso</button>
+    <button id="downloadErrorBtn" style="display:none">Baixar ZIP Erros</button>
+  </div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const status = document.getElementById('status');
+const progress = document.getElementById('progress');
+const logSuccess = document.getElementById('logSuccess');
+const logError = document.getElementById('logError');
+const downloadSuccessBtn = document.getElementById('downloadSuccessBtn');
+const downloadErrorBtn = document.getElementById('downloadErrorBtn');
+
+// Tab logic
+const tabSuccess = document.getElementById('tabSuccess');
+const tabError = document.getElementById('tabError');
+const successContent = document.getElementById('successContent');
+const errorContent = document.getElementById('errorContent');
+
+tabSuccess.onclick = () => {
+  tabSuccess.classList.add('active');
+  tabError.classList.remove('active');
+  successContent.classList.add('active');
+  errorContent.classList.remove('active');
+};
+tabError.onclick = () => {
+  tabError.classList.add('active');
+  tabSuccess.classList.remove('active');
+  errorContent.classList.add('active');
+  successContent.classList.remove('active');
+};
+
+let successZip = null;
+let errorZip = null;
+
+function sanitizeFileName(name) {
+  return name.replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Função que busca o nome do colaborador com base no padrão dolerite: número NOME MAIÚSCULO número
+function extractColaboradorName(text) {
+  // Junta todos os textos em uma única linha
+  const joined = text.replace(/\n/g, ' ');
+  // Regex: número espaço NOME (maiúsculo) espaço número
+  const match = joined.match(/(\d+)\s+([A-ZÀ-Ÿ\s]+)\s+(\d+)/);
+  if (match && match[2]) {
+    return match[2].trim();
+  }
+  return null;
+}
+
+async function processFiles(files) {
+  successZip = new JSZip();
+  errorZip = new JSZip();
+  logSuccess.innerHTML = '';
+  logError.innerHTML = '';
+  let nameCounts = {};
+  let successCount = 0;
+  let errorCount = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    status.innerHTML = `Processando arquivo ${i+1}/${files.length}...`;
+    progress.style.width = `${((i+1)/files.length)*100}%`;
+
+    const file = files[i];
+    let arrayBuffer;
+    try {
+      arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+      const page = await pdf.getPage(1);
+      const content = await page.getTextContent();
+      const fullText = content.items.map(i => i.str).join('\n');
+      const nome = extractColaboradorName(fullText);
+
+      if (!nome) {
+        logError.innerHTML += `<li class="error">[${file.name}] <b>Nome não identificado!</b></li>`;
+        errorZip.file(file.name, arrayBuffer); // Guarda PDF original nos erros
+        errorCount++;
+        continue;
+      }
+
+      let safeName = sanitizeFileName(nome);
+      if (nameCounts[safeName]) {
+        nameCounts[safeName]++;
+        safeName += ` (${nameCounts[safeName]})`;
+      } else {
+        nameCounts[safeName] = 1;
+      }
+
+      const newFileName = safeName + '.pdf';
+      successZip.file(newFileName, arrayBuffer);
+      logSuccess.innerHTML += `<li class="success">[${file.name}] &rarr; <b>${newFileName}</b></li>`;
+      successCount++;
+
+    } catch (err) {
+      logError.innerHTML += `<li class="error">[${file.name}] Erro ao processar: ${err.message}</li>`;
+      errorZip.file(file.name, arrayBuffer); // Guarda PDF original nos erros
+      errorCount++;
+    }
+  }
+
+  progress.style.width = `100%`;
+  status.innerHTML = `<b>Concluído!</b> (${successCount} arquivos renomeados, ${errorCount} com erro)`;
+
+  // Exibe botões para baixar os zips
+  downloadSuccessBtn.style.display = successCount ? 'inline-block' : 'none';
+  downloadErrorBtn.style.display = errorCount ? 'inline-block' : 'none';
+
+  downloadSuccessBtn.onclick = async function() {
+    status.innerHTML = 'Gerando ZIP de sucesso...';
+    const blob = await successZip.generateAsync({type:'blob'});
+    saveAs(blob, 'pdfs_sucesso.zip');
+    status.innerHTML = `<b>Concluído!</b> Download do ZIP de sucesso liberado.`;
+  };
+
+  downloadErrorBtn.onclick = async function() {
+    status.innerHTML = 'Gerando ZIP de erros...';
+    const blob = await errorZip.generateAsync({type:'blob'});
+    saveAs(blob, 'pdfs_erros.zip');
+    status.innerHTML = `<b>Concluído!</b> Download do ZIP de erros liberado.`;
+  };
+}
+
+fileInput.addEventListener('change', (e) => {
+  const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+  if (!files.length) {
+    status.innerHTML = '<span class="error">Selecione ao menos um arquivo PDF válido!</span>';
+    return;
+  }
+  status.innerHTML = `Iniciando processamento de ${files.length} arquivos...`;
+  downloadSuccessBtn.style.display = 'none';
+  downloadErrorBtn.style.display = 'none';
+  processFiles(files);
+});
+</script>
+</body>
+</html>

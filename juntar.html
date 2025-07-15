@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Juntador de Holerite + Comprovante - LEADEC</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      background: #f8f9fa;
+    }
+  
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 10px;
+      padding: 32px;
+      box-shadow: 0 0 30px #0002;
+    }
+  
+    .progress-bar {
+      height: 22px;
+      background: #e9ecef;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+  
+    .progress {
+      height: 100%;
+      background: #2d90f5;
+      width: 0;
+      transition: width 0.2s;
+    }
+  
+    .status {
+      margin-bottom: 10px;
+      font-size: 1.1em;
+      color: #2d90f5;
+    }
+  
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+  
+    .tab-btn {
+      padding: 7px 22px;
+      border: none;
+      border-radius: 8px 8px 0 0;
+      background: #e9ecef;
+      cursor: pointer;
+      color: #444;
+      font-weight: bold;
+    }
+  
+    .tab-btn.active {
+      background: #2d90f5;
+      color: #fff;
+    }
+  
+    ul {
+      font-size: 0.97em;
+      color: #333;
+      margin: 0;
+      padding-left: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  
+    .error {
+      color: #c00;
+      font-weight: bold;
+    }
+  
+    .success {
+      color: #090;
+      font-weight: bold;
+    }
+  
+    .warning {
+      color: #e67e00;
+      font-weight: bold;
+    }
+  
+    input[type="file"] {
+      padding: 10px;
+      margin-bottom: 20px;
+      width: 100%;
+    }
+  
+    a, button:not(.tab-btn) {
+      margin-top: 20px;
+      padding: 10px 30px;
+      border: none;
+      border-radius: 6px;
+      background: #2d90f5;
+      color: #fff;
+      font-size: 1.1em;
+      cursor: pointer;
+    }
+  
+    button:disabled {
+      background: #999;
+      cursor: not-allowed;
+    }
+  
+    .tab-content {
+      display: none;
+      min-height: 32px;
+    }
+  
+    .tab-content.active {
+      display: block;
+    }
+    
+    .file-input-group {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    
+    .file-input-group label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="index.html">Voltar</a>
+    <h2>Juntar Holerite + Comprovante</h2>
+    
+    <div class="file-input-group">
+      <label>Selecione os PDFs de Holerites:</label>
+      <input type="file" id="holeritesInput" accept="application/pdf" multiple>
+    </div>
+    
+    <div class="file-input-group">
+      <label>Selecione os PDFs de Comprovantes:</label>
+      <input type="file" id="comprovantesInput" accept="application/pdf" multiple>
+    </div>
+    
+    <button id="processBtn" onclick="processar()">Processar Arquivos</button>
+    
+    <div class="progress-bar"><div class="progress" id="progress"></div></div>
+    <div class="status" id="status">Aguardando arquivos...</div>
+    
+    <div class="tabs">
+      <button class="tab-btn active" id="tabSuccess">Sucesso</button>
+      <button class="tab-btn" id="tabError">Erros</button>
+    </div>
+    <div id="successContent" class="tab-content active">
+      <ul id="logSuccess"></ul>
+    </div>
+    <div id="errorContent" class="tab-content">
+      <ul id="logError"></ul>
+    </div>
+    <button id="downloadSuccessBtn" style="display:none">Baixar ZIP Sucesso</button>
+    <button id="downloadErrorBtn" style="display:none">Baixar ZIP Erros</button>
+  </div>
+
+<script>
+// Elementos da interface
+const holeritesInput = document.getElementById('holeritesInput');
+const comprovantesInput = document.getElementById('comprovantesInput');
+const processBtn = document.getElementById('processBtn');
+const status = document.getElementById('status');
+const progress = document.getElementById('progress');
+const logSuccess = document.getElementById('logSuccess');
+const logError = document.getElementById('logError');
+const downloadSuccessBtn = document.getElementById('downloadSuccessBtn');
+const downloadErrorBtn = document.getElementById('downloadErrorBtn');
+
+// Tab logic
+const tabSuccess = document.getElementById('tabSuccess');
+const tabError = document.getElementById('tabError');
+const successContent = document.getElementById('successContent');
+const errorContent = document.getElementById('errorContent');
+
+tabSuccess.onclick = () => {
+  tabSuccess.classList.add('active');
+  tabError.classList.remove('active');
+  successContent.classList.add('active');
+  errorContent.classList.remove('active');
+};
+
+tabError.onclick = () => {
+  tabError.classList.add('active');
+  tabSuccess.classList.remove('active');
+  errorContent.classList.add('active');
+  successContent.classList.remove('active');
+};
+
+// Variáveis globais
+let successZip = null;
+let errorZip = null;
+
+// Função para normalizar nomes (melhorada)
+function normalizarNome(nome) {
+  return nome
+    .toLowerCase()                            // tudo minúsculo
+    .replace(/\.[^/.]+$/, '')                 // remove extensão
+    .replace(/\s*\(\d+\)$/g, '')              // remove sufixo tipo (1), (2)
+    .replace(/[^a-z0-9à-ú\s]/gi, '')          // remove caracteres especiais
+    .replace(/\s+/g, ' ')                     // normaliza espaços múltiplos
+    .trim();                                  // remove espaços no início/fim
+}
+
+// Função para validar o tipo do PDF
+async function validarTipoPDF(file) {
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const primeiraPagina = await pdf.getPage(1);
+    const content = await primeiraPagina.getTextContent();
+    const text = content.items.map(i => i.str).join(' ').toUpperCase();
+    
+    if (text.includes("DEMONSTRATIVO DE PAGAMENTO")) {
+      return "holerite";
+    } else {
+      return "comprovante";
+    }
+  } catch (e) {
+    console.error("Erro ao validar PDF:", e);
+    return "erro";
+  }
+}
+
+// Função principal de processamento
+async function processar() {
+  const holerites = [...holeritesInput.files];
+  const comprovantes = [...comprovantesInput.files];
+  
+  if (holerites.length === 0 && comprovantes.length === 0) {
+    status.innerHTML = '<span class="error">Selecione arquivos em pelo menos um dos campos!</span>';
+    return;
+  }
+  
+  // Resetar interface
+  status.innerHTML = 'Validando arquivos...';
+  progress.style.width = '0%';
+  logSuccess.innerHTML = '';
+  logError.innerHTML = '';
+  downloadSuccessBtn.style.display = 'none';
+  downloadErrorBtn.style.display = 'none';
+  processBtn.disabled = true;
+  
+  // Criar ZIPs
+  successZip = new JSZip();
+  errorZip = new JSZip();
+  
+  // Processar arquivos
+  let totalProcessados = 0;
+  let totalSucesso = 0;
+  let totalErros = 0;
+  
+  // Mapear arquivos por tipo e nome normalizado
+  const arquivosPorTipo = {
+    holerite: {},
+    comprovante: {}
+  };
+  
+  // Primeiro validar todos os arquivos
+  const todosArquivos = [...holerites, ...comprovantes];
+  const totalArquivos = todosArquivos.length;
+  
+  for (let i = 0; i < todosArquivos.length; i++) {
+    const file = todosArquivos[i];
+    status.innerHTML = `Validando arquivo ${i+1}/${totalArquivos}...`;
+    progress.style.width = `${((i+1)/totalArquivos)*50}%`;
+    
+    try {
+      const tipo = await validarTipoPDF(file);
+      const nomeNormalizado = normalizarNome(file.name);
+      
+      if (tipo === "erro") {
+        logError.innerHTML += `<li class="error">❌ [${file.name}] - Arquivo inválido ou corrompido</li>`;
+        errorZip.file(`erros/${file.name}`, file);
+        totalErros++;
+        continue;
+      }
+      
+      // Armazenar no mapa correspondente
+      if (!arquivosPorTipo[tipo][nomeNormalizado]) {
+        arquivosPorTipo[tipo][nomeNormalizado] = [];
+      }
+      arquivosPorTipo[tipo][nomeNormalizado].push(file);
+      
+    } catch (err) {
+      logError.innerHTML += `<li class="error">❌ [${file.name}] - Erro ao processar: ${err.message}</li>`;
+      errorZip.file(`erros/${file.name}`, file);
+      totalErros++;
+    }
+  }
+  
+  // Agora parear os arquivos
+  const todosNomes = new Set([
+    ...Object.keys(arquivosPorTipo.holerite),
+    ...Object.keys(arquivosPorTipo.comprovante)
+  ]);
+  
+  let processadosPareamento = 0;
+  const totalParaParear = todosNomes.size;
+  
+  for (const nomeNormalizado of todosNomes) {
+    processadosPareamento++;
+    status.innerHTML = `Pareando arquivos ${processadosPareamento}/${totalParaParear}...`;
+    progress.style.width = `${50 + ((processadosPareamento/totalParaParear)*50)}%`;
+    
+    const holerites = arquivosPorTipo.holerite[nomeNormalizado] || [];
+    const comprovantes = arquivosPorTipo.comprovante[nomeNormalizado] || [];
+    
+    // Verificar se temos ambos os tipos
+    if (holerites.length > 0 && comprovantes.length > 0) {
+      try {
+        // Criar PDF combinado
+        const mergedPdf = await PDFLib.PDFDocument.create();
+        
+        // Adicionar holerites (todas as páginas)
+        for (const holerite of holerites) {
+          const pdfBytes = await holerite.arrayBuffer();
+          const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+          const pages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
+          pages.forEach(page => mergedPdf.addPage(page));
+        }
+        
+        // Adicionar comprovantes (todas as páginas)
+        for (const comprovante of comprovantes) {
+          const pdfBytes = await comprovante.arrayBuffer();
+          const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+          const pages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
+          pages.forEach(page => mergedPdf.addPage(page));
+        }
+        
+        // Salvar PDF combinado
+        const mergedPdfBytes = await mergedPdf.save();
+        const nomeFinal = `${nomeNormalizado}.pdf`;
+        successZip.file(nomeFinal, mergedPdfBytes);
+        
+        // Log de sucesso
+        logSuccess.innerHTML += `<li class="success">✅ ${nomeFinal} - ${holerites.length} holerite(s) + ${comprovantes.length} comprovante(s)</li>`;
+        totalSucesso++;
+        
+      } catch (err) {
+        // Erro ao juntar PDFs
+        logError.innerHTML += `<li class="error">❌ [${nomeNormalizado}] - Erro ao juntar PDFs: ${err.message}</li>`;
+        
+        // Adicionar arquivos originais ao ZIP de erros
+        for (const holerite of holerites) {
+          errorZip.file(`holerites/${holerite.name}`, holerite);
+        }
+        for (const comprovante of comprovantes) {
+          errorZip.file(`comprovantes/${comprovante.name}`, comprovante);
+        }
+        totalErros++;
+      }
+    } else {
+      // Arquivos sem par - adicionar ao ZIP de erros
+      const tipoFaltando = holerites.length === 0 ? "holerite" : "comprovante";
+      logError.innerHTML += `<li class="warning">⚠️ [${nomeNormalizado}] - Falta ${tipoFaltando} correspondente</li>`;
+      
+      // Adicionar arquivos existentes ao ZIP de erros
+      for (const holerite of holerites) {
+        errorZip.file(`holerites/${holerite.name}`, holerite);
+      }
+      for (const comprovante of comprovantes) {
+        errorZip.file(`comprovantes/${comprovante.name}`, comprovante);
+      }
+      totalErros++;
+    }
+  }
+  
+  // Finalização
+  progress.style.width = '100%';
+  status.innerHTML = `<b>Processamento concluído!</b> ${totalSucesso} arquivos combinados, ${totalErros} erros/avisos.`;
+  processBtn.disabled = false;
+  
+  // Configurar botões de download
+  if (totalSucesso > 0) {
+    downloadSuccessBtn.style.display = 'inline-block';
+    downloadSuccessBtn.onclick = async function() {
+      status.innerHTML = 'Gerando ZIP de sucesso...';
+      const blob = await successZip.generateAsync({type:'blob'});
+      saveAs(blob, 'juntados_sucesso.zip');
+      status.innerHTML = `<b>Concluído!</b> Download do ZIP de sucesso liberado.`;
+    };
+  }
+  
+  if (totalErros > 0) {
+    downloadErrorBtn.style.display = 'inline-block';
+    downloadErrorBtn.onclick = async function() {
+      status.innerHTML = 'Gerando ZIP de erros...';
+      const blob = await errorZip.generateAsync({type:'blob'});
+      saveAs(blob, 'juntados_falha.zip');
+      status.innerHTML = `<b>Concluído!</b> Download do ZIP de erros liberado.`;
+    };
+  }
+}
+</script>
+</body>
+</html>
